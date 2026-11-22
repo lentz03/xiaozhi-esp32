@@ -30,9 +30,13 @@ public:
                      bool swap_xy, custom_epd_spi_t _epd_spi_data);
     ~CustomEpdDisplay();
 
-    /* Inkdeck: show your last words and the AI reply together, labelled ME: / AI: */
+    /* Inkdeck "Letter" chat screen: your words in clean sans, the reply in a book serif,
+     * and a state line (Ready / Listening / Speaking) with a sound wave at the bottom. */
+    void SetupUI() override;
     void SetChatMessage(const char* role, const char* content) override;
     void ClearChatMessages() override;
+    void SetStatus(const char* status) override;
+    void SetTheme(Theme* theme) override;
 
     void EPD_Init();    /* 墨水屏初始化 */
     void EPD_Clear();   /* 清空屏幕 */
@@ -51,6 +55,19 @@ private:
     const int Height;
     int rot_ = 0;         /* Inkdeck portrait: 0 or 1 (180 degrees), from the launcher setting */
     std::string last_user_, reply_;
+    bool system_msg_ = false;
+    lv_font_t serif_ = {};                 /* book serif with the CJK text font as fallback */
+    lv_obj_t* letter_ = nullptr;
+    lv_obj_t* me_tag_ = nullptr;
+    lv_obj_t* me_text_ = nullptr;
+    lv_obj_t* rule_ = nullptr;
+    lv_obj_t* ai_tag_ = nullptr;
+    lv_obj_t* ai_text_ = nullptr;
+    lv_obj_t* state_dot_ = nullptr;
+    lv_obj_t* state_label_ = nullptr;
+    lv_obj_t* wave_ = nullptr;
+    void RenderLetter();
+    void UpdateFooter(const char* status);
     spi_device_handle_t spi;
     uint8_t* buffer = NULL;
 

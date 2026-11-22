@@ -11,6 +11,14 @@
 #include "config.h"
 #include "esp_lvgl_port.h"
 #include "settings.h"
+#include "lvgl_theme.h"
+#include "assets/lang_config.h"
+
+extern "C" {
+LV_FONT_DECLARE(font_inkdeck_serif_34);
+LV_FONT_DECLARE(font_inkdeck_serif_italic_28);
+LV_FONT_DECLARE(font_inkdeck_sans_17);
+}
 
 #define TAG "CustomEpdDisplay"
 
@@ -404,38 +412,197 @@ void CustomEpdDisplay::EPD_DrawColorPixel(uint16_t x, uint16_t y, uint8_t color)
     }
 }
 
+/* ------------------------------------------------------------ Inkdeck "Letter" chat screen */
+static void ink_plain(lv_obj_t* o) {
+    lv_obj_remove_style_all(o);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+}
+static void ink_black(lv_obj_t* o) {
+    lv_obj_set_style_bg_color(o, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+}
+static void ink_show(lv_obj_t* o, bool on) {
+    if (o == nullptr) return;
+    if (on) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+}
+
+void CustomEpdDisplay::SetupUI() {
+    if (letter_ != nullptr) return;                     /* already built */
+    LcdDisplay::SetupUI();
+    DisplayLockGuard lock(this);
+    auto lvgl_theme = static_cast<LvglTheme*>(current_theme_);
+    const lv_font_t* text_font = lvgl_theme->text_font()->font();
+    serif_ = font_inkdeck_serif_34;
+    serif_.fallback = text_font;
+    ink_show(emoji_box_, false);
+    ink_show(bottom_bar_, false);
+
+    lv_obj_t* screen = lv_screen_active();
+    const int W = LV_HOR_RES, H = LV_VER_RES, M = 28, top = 64, footer_y = H - 118;
+
+    letter_ = lv_obj_create(screen);
+    lv_obj_remove_style_all(letter_);
+    lv_obj_set_pos(letter_, M, top);
+    lv_obj_set_size(letter_, W - 2 * M, footer_y - top - 12);
+    lv_obj_set_flex_flow(letter_, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(letter_, 8, 0);
+    lv_obj_set_scrollbar_mode(letter_, LV_SCROLLBAR_MODE_OFF);
+
+    auto label = [this](const lv_font_t* f) {
+        lv_obj_t* l = lv_label_create(letter_);
+        lv_obj_set_width(l, LV_PCT(100));
+        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(l, f, 0);
+        lv_obj_set_style_text_color(l, lv_color_black(), 0);
+        lv_label_set_text(l, "");
+        return l;
+    };
+    me_tag_ = label(&font_inkdeck_sans_17);
+    lv_obj_set_style_text_letter_space(me_tag_, 3, 0);
+    lv_label_set_text(me_tag_, "ME");
+    me_text_ = label(text_font);
+    rule_ = lv_obj_create(letter_);
+    ink_plain(rule_);
+    ink_black(rule_);
+    lv_obj_set_size(rule_, 32, 2);
+    lv_obj_set_style_margin_top(rule_, 14, 0);
+    lv_obj_set_style_margin_bottom(rule_, 14, 0);
+    ai_tag_ = label(&font_inkdeck_sans_17);
+    lv_obj_set_style_text_letter_space(ai_tag_, 3, 0);
+    lv_label_set_text(ai_tag_, "AI");
+    ai_text_ = label(&serif_);
+    lv_obj_set_style_text_line_space(ai_text_, 4, 0);
+
+    /* footer: hairline, state dot + word, sound wave, hint */
+    lv_obj_t* line = lv_obj_create(screen);
+    ink_plain(line);
+    ink_black(line);
+    lv_obj_set_pos(line, M, footer_y);
+    lv_obj_set_size(line, W - 2 * M, 1);
+
+    state_dot_ = lv_obj_create(screen);
+    ink_plain(state_dot_);
+    ink_black(state_dot_);
+    lv_obj_set_style_radius(state_dot_, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_color(state_dot_, lv_color_black(), 0);
+    lv_obj_set_style_border_width(state_dot_, 2, 0);
+    lv_obj_set_pos(state_dot_, M, footer_y + 34);
+    lv_obj_set_size(state_dot_, 16, 16);
+
+    state_label_ = lv_label_create(screen);
+    lv_obj_set_style_text_font(state_label_, &font_inkdeck_serif_italic_28, 0);
+    lv_obj_set_style_text_color(state_label_, lv_color_black(), 0);
+    lv_obj_set_pos(state_label_, M + 28, footer_y + 22);
+    lv_label_set_text(state_label_, "Ready");
+
+    wave_ = lv_obj_create(screen);
+    ink_plain(wave_);
+    lv_obj_set_pos(wave_, W - M - 170, footer_y + 26);
+    lv_obj_set_size(wave_, 170, 32);
+    static const uint8_t heights[18] = { 10, 18, 26, 14, 30, 22, 12, 28, 20, 32, 16, 24, 30, 12, 22, 18, 26, 10 };
+    for (int i = 0; i < 18; i++) {
+        lv_obj_t* bar = lv_obj_create(wave_);
+        ink_plain(bar);
+        ink_black(bar);
+        lv_obj_set_style_radius(bar, 2, 0);
+        lv_obj_set_pos(bar, i * 9 + 2, (32 - heights[i]) / 2);
+        lv_obj_set_size(bar, 6, heights[i]);
+    }
+    ink_show(wave_, false);
+
+    lv_obj_t* hint = lv_label_create(screen);
+    lv_obj_set_style_text_font(hint, &font_inkdeck_sans_17, 0);
+    lv_obj_set_style_text_color(hint, lv_color_black(), 0);
+    lv_obj_set_pos(hint, M, H - 42);
+    lv_label_set_text(hint, "Tap BOOT to talk \xc2\xb7 say \xe2\x80\x9cHi ESP\xe2\x80\x9d to wake");
+
+    RenderLetter();
+}
+
+/* Called with the display locked. */
+void CustomEpdDisplay::RenderLetter() {
+    if (letter_ == nullptr) return;
+    const bool have_me = !last_user_.empty();
+    ink_show(me_tag_, have_me);
+    ink_show(me_text_, have_me);
+    ink_show(rule_, have_me);
+    if (have_me) lv_label_set_text(me_text_, last_user_.c_str());
+    ink_show(ai_tag_, !reply_.empty() && !system_msg_);
+    if (!reply_.empty()) lv_label_set_text(ai_text_, reply_.c_str());
+    else if (!have_me) lv_label_set_text(ai_text_, "Say \xe2\x80\x9cHi ESP\xe2\x80\x9d, or tap BOOT to talk.");
+    else lv_label_set_text(ai_text_, "");
+    lv_obj_update_layout(letter_);
+    lv_obj_scroll_to_view_recursive(ai_text_, LV_ANIM_OFF);
+}
+
 void CustomEpdDisplay::SetChatMessage(const char* role, const char* content) {
-    const bool user = strcmp(role, "user") == 0, ai = strcmp(role, "assistant") == 0;
-    if (!user && !ai) {
+    if (letter_ == nullptr) {
         LcdDisplay::SetChatMessage(role, content);
         return;
     }
-    if (content == nullptr) content = "";
-    if (user) {
+    if (content == nullptr || content[0] == 0) return;
+    DisplayLockGuard lock(this);
+    if (strcmp(role, "user") == 0) {
         last_user_ = content;
         reply_.clear();
-    } else if (content[0] != 0) {
+        system_msg_ = false;
+    } else if (strcmp(role, "assistant") == 0) {
+        if (system_msg_) { reply_.clear(); system_msg_ = false; }
         if (!reply_.empty()) reply_ += " ";
         reply_ += content;
-        if (reply_.size() > 900) {                      /* keep the end of a long answer */
-            size_t cut = reply_.size() - 900;
+        if (reply_.size() > 420) {                      /* keep the end of a long answer on screen */
+            size_t cut = reply_.size() - 420;
             while (cut < reply_.size() && (reply_[cut] & 0xC0) == 0x80) cut++;   /* UTF-8 boundary */
-            reply_ = "... " + reply_.substr(cut);
+            reply_ = "\xe2\x80\xa6" + reply_.substr(cut);
         }
+    } else {                                            /* system: activation code, errors */
+        last_user_.clear();
+        reply_ = content;
+        system_msg_ = true;
     }
-    std::string text;
-    if (!last_user_.empty()) text = "ME: " + last_user_;
-    if (!reply_.empty()) {
-        if (!text.empty()) text += "\n\n";
-        text += "AI: " + reply_;
-    }
-    LcdDisplay::SetChatMessage(role, text.c_str());
-    DisplayLockGuard lock(this);
-    if (chat_message_label_ != nullptr) lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_LEFT, 0);
+    RenderLetter();
 }
 
 void CustomEpdDisplay::ClearChatMessages() {
+    LcdDisplay::ClearChatMessages();
+    DisplayLockGuard lock(this);
     last_user_.clear();
     reply_.clear();
-    LcdDisplay::ClearChatMessages();
+    system_msg_ = false;
+    ink_show(bottom_bar_, false);
+    RenderLetter();
+}
+
+void CustomEpdDisplay::SetStatus(const char* status) {
+    LcdDisplay::SetStatus(status);
+    UpdateFooter(status);
+}
+
+void CustomEpdDisplay::UpdateFooter(const char* status) {
+    if (state_label_ == nullptr || status == nullptr) return;
+    const char* word = nullptr;
+    bool active = false, speaking = false;
+    if (strcmp(status, Lang::Strings::LISTENING) == 0) { word = "Listening"; active = true; }
+    else if (strcmp(status, Lang::Strings::SPEAKING) == 0) { word = "Speaking"; active = speaking = true; }
+    else if (strcmp(status, Lang::Strings::STANDBY) == 0) word = "Ready";
+    else if (strcmp(status, Lang::Strings::CONNECTING) == 0) word = "Connecting\xe2\x80\xa6";
+    if (word == nullptr) return;                        /* other messages stay in the top bar */
+    DisplayLockGuard lock(this);
+    lv_label_set_text(state_label_, word);
+    lv_obj_set_style_bg_opa(state_dot_, active ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    ink_show(wave_, speaking);
+}
+
+void CustomEpdDisplay::SetTheme(Theme* theme) {
+    LcdDisplay::SetTheme(theme);
+    if (letter_ == nullptr) return;
+    DisplayLockGuard lock(this);
+    auto lvgl_theme = static_cast<LvglTheme*>(current_theme_);
+    const lv_font_t* text_font = lvgl_theme->text_font()->font();
+    serif_.fallback = text_font;                        /* fonts can arrive later from the assets */
+    lv_obj_set_style_text_font(me_text_, text_font, 0);
+    lv_obj_set_style_text_font(ai_text_, &serif_, 0);
+    ink_show(emoji_box_, false);
+    ink_show(bottom_bar_, false);
 }
