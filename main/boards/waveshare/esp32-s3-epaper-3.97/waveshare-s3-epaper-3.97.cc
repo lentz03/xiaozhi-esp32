@@ -128,7 +128,8 @@ private:
         epd_spi_data.scl = EPD_SCK_PIN;
         epd_spi_data.spi_host = EPD_SPI_NUM;
         epd_spi_data.buffer_len = 48000;
-        display_ = new CustomEpdDisplay(NULL, NULL, EXAMPLE_LCD_WIDTH, EXAMPLE_LCD_HEIGHT,
+        /* Inkdeck: portrait (480 x 800); the driver rotates onto the landscape panel */
+        display_ = new CustomEpdDisplay(NULL, NULL, EXAMPLE_LCD_HEIGHT, EXAMPLE_LCD_WIDTH,
                                         DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X,
                                         DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY, epd_spi_data);
     }

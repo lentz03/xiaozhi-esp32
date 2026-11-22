@@ -4,6 +4,9 @@
 #include <freertos/FreeRTOS.h>
 #include <stdio.h>
 #include <vector>
+#include <cstring>
+#include <string>
+#include <nvs.h>
 #include "board.h"
 #include "config.h"
 #include "esp_lvgl_port.h"
@@ -19,10 +22,12 @@ void CustomEpdDisplay::lvgl_flush_cb(lv_display_t* disp, const lv_area_t* area, 
     CustomEpdDisplay* driver = (CustomEpdDisplay*)lv_display_get_user_data(disp);
     uint16_t* buffer = (uint16_t*)color_p;
     driver->EPD_Clear();
+    /* Inkdeck: LVGL draws a 480 x 800 portrait screen; turn it onto the 800 x 480 panel. */
     for (int y = area->y1; y <= area->y2; y++) {
         for (int x = area->x1; x <= area->x2; x++) {
             uint8_t color = (*buffer < 0x7fff) ? DRIVER_COLOR_BLACK : DRIVER_COLOR_WHITE;
-            driver->EPD_DrawColorPixel(x, y, color);
+            if (driver->rot_ == 0) driver->EPD_DrawColorPixel(driver->Width - 1 - y, x, color);
+            else                   driver->EPD_DrawColorPixel(y, driver->Height - 1 - x, color);
             buffer++;
         }
     }
@@ -35,8 +40,15 @@ CustomEpdDisplay::CustomEpdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_p
                                    bool mirror_y, bool swap_xy, custom_epd_spi_t _epd_spi_data)
     : LcdDisplay(panel_io, panel, width, height),
       epd_spi_data(_epd_spi_data),
-      Width(width),
-      Height(height) {
+      Width(EXAMPLE_LCD_WIDTH),
+      Height(EXAMPLE_LCD_HEIGHT) {
+    nvs_handle_t nvs;
+    int32_t rot = 0;
+    if (nvs_open("inkdeck", NVS_READONLY, &nvs) == ESP_OK) {   /* same setting as the Inkdeck launcher */
+        nvs_get_i32(nvs, "rot", &rot);
+        nvs_close(nvs);
+    }
+    rot_ = rot & 1;
     ESP_LOGI(TAG, "Initialize SPI");
     spi_port_init();
     spi_gpio_init();
@@ -390,4 +402,40 @@ void CustomEpdDisplay::EPD_DrawColorPixel(uint16_t x, uint16_t y, uint8_t color)
     } else {
         buffer[index] &= ~(0x01 << bit);
     }
+}
+
+void CustomEpdDisplay::SetChatMessage(const char* role, const char* content) {
+    const bool user = strcmp(role, "user") == 0, ai = strcmp(role, "assistant") == 0;
+    if (!user && !ai) {
+        LcdDisplay::SetChatMessage(role, content);
+        return;
+    }
+    if (content == nullptr) content = "";
+    if (user) {
+        last_user_ = content;
+        reply_.clear();
+    } else if (content[0] != 0) {
+        if (!reply_.empty()) reply_ += " ";
+        reply_ += content;
+        if (reply_.size() > 900) {                      /* keep the end of a long answer */
+            size_t cut = reply_.size() - 900;
+            while (cut < reply_.size() && (reply_[cut] & 0xC0) == 0x80) cut++;   /* UTF-8 boundary */
+            reply_ = "... " + reply_.substr(cut);
+        }
+    }
+    std::string text;
+    if (!last_user_.empty()) text = "ME: " + last_user_;
+    if (!reply_.empty()) {
+        if (!text.empty()) text += "\n\n";
+        text += "AI: " + reply_;
+    }
+    LcdDisplay::SetChatMessage(role, text.c_str());
+    DisplayLockGuard lock(this);
+    if (chat_message_label_ != nullptr) lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_LEFT, 0);
+}
+
+void CustomEpdDisplay::ClearChatMessages() {
+    last_user_.clear();
+    reply_.clear();
+    LcdDisplay::ClearChatMessages();
 }

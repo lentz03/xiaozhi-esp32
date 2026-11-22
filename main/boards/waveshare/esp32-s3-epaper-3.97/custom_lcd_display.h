@@ -3,6 +3,7 @@
 
 #include <driver/gpio.h>
 #include "lcd_display.h"
+#include <string>
 
 /* Display color */
 typedef enum {
@@ -29,6 +30,10 @@ public:
                      bool swap_xy, custom_epd_spi_t _epd_spi_data);
     ~CustomEpdDisplay();
 
+    /* Inkdeck: show your last words and the AI reply together, labelled ME: / AI: */
+    void SetChatMessage(const char* role, const char* content) override;
+    void ClearChatMessages() override;
+
     void EPD_Init();    /* 墨水屏初始化 */
     void EPD_Clear();   /* 清空屏幕 */
     void EPD_Display(); /* 刷buffer到墨水屏 */
@@ -42,8 +47,10 @@ public:
 
 private:
     const custom_epd_spi_t epd_spi_data;
-    const int Width;
+    const int Width;      /* panel size, always 800 x 480 (landscape) */
     const int Height;
+    int rot_ = 0;         /* Inkdeck portrait: 0 or 1 (180 degrees), from the launcher setting */
+    std::string last_user_, reply_;
     spi_device_handle_t spi;
     uint8_t* buffer = NULL;
 
